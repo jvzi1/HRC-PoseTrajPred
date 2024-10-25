@@ -7,3 +7,10 @@ v_YoYo_g01_c01.avi
 yolov8l.pt
 /logs/
 test.py
+data/
+data_process_only_xy.py
+mediapipe_to_video.py
+output_keypoints/
+tracking/
+train.py
+video_split.py

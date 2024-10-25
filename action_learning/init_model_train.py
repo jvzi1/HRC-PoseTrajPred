@@ -8,6 +8,8 @@ import os
 from torch.autograd import Variable
 from tqdm import tqdm
 # from tensorboardX import SummaryWriter
+from loguru import logger
+from datatime import datatime
 from dataset import VideoDataset 
 import C3D_model  
 from config import CONFIG
@@ -46,8 +48,8 @@ def train_model(num_epochs, num_classes, lr, device, save_dir, train_dataloader,
     criterion = criterion.to(device)
 
     # 日志记录
-    log_dir = os.path.join(save_dir, 'logs', datetime.now().strftime('%b%d_%H-%M-%S'))
-    writer = SummaryWriter(log_dir=log_dir)
+    log_filename = f"logs/run_{datetime.now():%Y-%m-%d_%H-%M-%S}.log"
+    logger.add(log_filename, format="{time} - {level} - {message}", level="INFO", retention="7 days")
 
     # 开始训练
     for epoch in range(num_epochs):
@@ -91,10 +93,10 @@ def train_model(num_epochs, num_classes, lr, device, save_dir, train_dataloader,
             epoch_acc = running_corrects.double() / len(train_dataloader.dataset)
 
             # 记录日志
-            writer.add_scalar(f'data/{phase}_loss_epoch', epoch_loss, epoch)
-            writer.add_scalar(f'data/{phase}_acc_epoch', epoch_acc, epoch)
+            logger.info(f'data/{phase}_loss_epoch{epoch_loss} {epoch}')
+            logger.info(f'data/{phase}_acc_epoch {epoch_acc} {epoch}')
 
-            print(f"[{phase}] Epoch: {epoch + 1}/{num_epochs} Loss: {epoch_loss:.4f} Acc: {epoch_acc:.4f}")
+            logger.info(f"[{phase}] Epoch: {epoch + 1}/{num_epochs} Loss: {epoch_loss:.4f} Acc: {epoch_acc:.4f}")
 
             # 保存最佳模型
             if phase == 'val' and epoch_acc > best_val_acc:
@@ -102,19 +104,19 @@ def train_model(num_epochs, num_classes, lr, device, save_dir, train_dataloader,
                 best_epoch = epoch
                 best_model_path = os.path.join(train_subfolder, f'C3D_best_epoch-{best_epoch + 1}.pth.tar')
                 torch.save({'epoch': best_epoch + 1, 'state_dict': model.state_dict(), 'opt_dict': optimizer.state_dict()}, best_model_path)
-                print(f"Save best model at {best_model_path}")
+                logger.info(f"Save best model at {best_model_path}")
 
-    writer.close()
+
 
     # 保存最后一个 epoch 的模型
     last_model_path = os.path.join(train_subfolder, f'C3D_last_epoch-{num_epochs}.pth.tar')
     torch.save({'epoch': num_epochs, 'state_dict': model.state_dict(), 'opt_dict': optimizer.state_dict()}, last_model_path)
-    print(f"Save last model at {last_model_path}")
+    logger.info(f"Save last model at {last_model_path}")
 
 if __name__ == "__main__":
     # 配置训练参数
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-    num_epochs = 20  # 训练轮次
+    num_epochs = 50  # 训练轮次
     num_classes = 6   # 类别数量
     lr = 1e-4  # 学习率
     save_dir = os.path.join(CONFIG.SAVE_DIR,"init_model")

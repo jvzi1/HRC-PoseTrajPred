@@ -5,13 +5,25 @@ import torch
 import numpy as np
 import json
 import C3D_model
-
+"""
+update:
+1.滑动窗口
+2.加权平滑
+分成两个py文件
+"""
 
 class ActionRecognizer:
-    def __init__(self, model_path, video_path):
+    def __init__(self, model_path, video_path, alpha=0.8, min_segment_length=16):
         self.model_path = model_path
         self.video_path = video_path
 
+        self.alpha = alpha # 加权平滑系数
+        self.min_segment_length = min_segment_length  # 最小片段长度
+        self.delay_threshold = delay_threshold  # 延迟确认阈值
+        self.current_label = None
+        self.segment_start = 0
+        self.delay_counter = 0
+        self.smoothed_label_probs = None  # 初始平滑概率
     def center_crop(self, frame):
         frame = frame[8:120, 30:142, :]
         return np.array(frame).astype(np.uint8)
@@ -42,7 +54,7 @@ class ActionRecognizer:
             new_width = int(width / 2)
             new_height = int(height / 2)
             frame = cv2.resize(frame, (new_width, new_height))
-            tmp_ = self.center_crop(cv2.resize(frame, (171, 128)))  # 是否需要
+            tmp_ = self.center_crop(cv2.resize(frame, (171, 128)))  # 是否需要--TODO 不需要，后续删除
             tmp = tmp_ - np.array([[[90.0, 98.0, 102.0]]])
             clip.append(tmp)
 

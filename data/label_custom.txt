@@ -1,6 +1,6 @@
-1 0
-2 1
-3 2
-4 3
-5 4
-6 5
+1 walk
+2 operate
+3 crouch
+4 carry
+5 playphone
+6 measure

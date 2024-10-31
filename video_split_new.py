@@ -1,17 +1,22 @@
 import os
-
 import cv2
 import torch
 import numpy as np
 import json
 import C3D_model
-
+from loguru import logger
 from smoother import ActionSegmentSmoother
+from tqdm import tqdm
+import time
 """
 update:
 1.滑动窗口
 2.加权平滑,并且当
 分成两个py文件
+
+update:
+问题：为什么切出视频过少
+更新：标签更新名称√
 """
 
 
@@ -20,7 +25,7 @@ class ActionRecognizer:
         self.model_path = model_path
         self.video_path = video_path
         self.num_classes = num_classes
-
+        self.smoother = ActionSegmentSmoother(alpha=0.9, min_segment_length=16, delay_threshold=5)
     # def center_crop(self, frame):
     #     frame = frame[8:120, 30:142, :]
     #     return np.array(frame).astype(np.uint8)
@@ -28,10 +33,11 @@ class ActionRecognizer:
         return frame[8:120, 30:142, :]
      
     def interface(self, video_path):
+        logger.info("start interface ")
+        start_time = time.time()
         device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-        with open("./data/labels.txt", 'r') as f:
-            class_names = f.readlines()
-            f.close()
+        with open("./data/label_custom.txt", 'r') as f:
+            class_names = [line.strip() for line in f.readlines()]
         model = C3D_model.C3D(num_classes=self.num_classes)
         checkpoint = torch.load(self.model_path, map_location=device)
         model.load_state_dict(checkpoint['state_dict'])
@@ -69,23 +75,27 @@ class ActionRecognizer:
                     outputs = model.forward(inputs)
                 # probs = torch.nn.Softmax(dim=1)(outputs) 
                 probs = torch.nn.Softmax(dim=1)(outputs).cpu().numpy()[0]# TODO 修改激活函数
-                label_num = torch.max(probs, 1)[1].detach().cpu().numpy()[0]
-                label = class_names[label_num]
-                if current_label is None:
-                    current_label = label
-                    frame_start = frame_count
-                    print(f'started recording video: {frame_start}')
-                elif label != current_label:
-                    results.append((frame_start, frame_count - 1, current_label))
-                    current_label = label
-                    frame_start = frame_count
+                # label_num = torch.max(probs, 1)[1].detach().cpu().numpy()[0]
+                # label = class_names[label_num]
+                # if current_label is None:
+                #     current_label = label
+                #     frame_start = frame_count
+                #     print(f'started recording video: {frame_start}')
+                # elif label != current_label:
+                #     results.append((frame_start, frame_count - 1, current_label))
+                #     current_label = label
+                #     frame_start = frame_count
+                frame_probs.append(probs)
                 clip = []
             frame_count += 1
-        if current_label is not None:
-            results.append((frame_start, frame_count - 1, current_label))
+        # if current_label is not None:
+        #     results.append((frame_start, frame_count - 1, current_label))
         cap.release()
-
-        # detect
+        end_time = time.time()
+        logger.info(f"Interface task cost {end_time - start_time}s")
+        # smoother
+        results = self.smoother.smooth_and_segment(frame_probs, class_names)
+        
         return results
 
     def save_video_info(self, results, video_path, json_path):
@@ -104,18 +114,17 @@ class ActionRecognizer:
 
     def split_videos(self, results, save_dir):
         cap = cv2.VideoCapture(self.video_path)
+        width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+        height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        fps = cap.get(cv2.CAP_PROP_FPS)
         if not os.path.exists(save_dir):
             os.makedirs(save_dir)
 
-        for start_frame, end_frame, label in results:
+        for start_frame, end_frame, label in tqdm(results):
             cap.set(cv2.CAP_PROP_POS_FRAMES, start_frame)
             out_path = os.path.join(save_dir, f"{label}_{start_frame}_{end_frame}.mp4")
             fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-            fps = cap.get(cv2.CAP_PROP_FPS)
-            width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-            height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
             out = cv2.VideoWriter(out_path, fourcc, fps, (width, height))
-
             for frame_num in range(start_frame, end_frame + 1):
                 ret, frame = cap.read()
                 if ret:
@@ -133,7 +142,7 @@ class ActionRecognizer:
 
 if __name__ == "__main__":
     model_path = "./model_result/best_model_0811/C3D_best_epoch-71.pth.tar"
-    video_dir = './dataset/20240728151716'
+    video_dir = './dataset/20240728150812'
     video_names = [
         "video_1.mp4",
         "video_2.mp4",
@@ -141,9 +150,11 @@ if __name__ == "__main__":
     ]
 
     main_video_path = os.path.join(video_dir, video_names[0])
+    logger.info("start action recognize")
     action_recognizer = ActionRecognizer(model_path, main_video_path)
-    results = action_recognizer.interface(main_video_path)
+    results = action_recognizer.interface(main_video_path) # 只需要用第一个视频的输出-- TODO 是否需要添加其他视频的输出做一个对照
     for video_name in video_names:
         video_path = os.path.join(video_dir, video_name)
+        logger.info("start action recognize")
         action_recognizer.save_video_info(results, video_path, os.path.join(video_dir, video_name + ".json"))
         action_recognizer.split_videos(results, os.path.join(video_dir, video_name + "_split"))

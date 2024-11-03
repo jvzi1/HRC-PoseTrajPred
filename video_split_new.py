@@ -8,6 +8,7 @@ from loguru import logger
 from smoother import ActionSegmentSmoother
 from tqdm import tqdm
 import time
+import matplotlib.pyplot as plt
 """
 update:
 1.滑动窗口
@@ -93,10 +94,17 @@ class ActionRecognizer:
         cap.release()
         end_time = time.time()
         logger.info(f"Interface task cost {end_time - start_time}s")
+
+        # 计算置信度
+        labeled_segments = self.calculate_segment_confidence(results, frame_probs, class_names)
         # smoother
-        results = self.smoother.smooth_and_segment(frame_probs, class_names)
-        
-        return results
+        self.vis_category_dist(labeled_segments, class_names)
+
+        smoothed_results = self.smoother.smooth_and_segment(frame_probs, class_names)
+        labeled_segments = self.calculate_segment_confidence(smoothed_results, frame_probs, class_names)
+        self.vis_category_dist2(labeled_segments, class_names)
+
+        return smoothed_results
 
     def save_video_info(self, results, video_path, json_path):
         video_info = {
@@ -136,13 +144,77 @@ class ActionRecognizer:
 
         cap.release()
 
+    def calculate_segment_confidence(self, results, frame_probs, class_names):
+        # 计算每个片段的平均置信度
+        labeled_segments = []
+        for start_frame, end_frame, label in results:
+            segment_probs = frame_probs[start_frame:end_frame + 1]
+            # 计算每帧的置信度
+            confidences = [max(probs) for probs in segment_probs]
+            avg_confidence = np.mean(confidences)
+            labeled_segments.append((start_frame, end_frame, label, avg_confidence))
+        return labeled_segments
+    def vis_category_dist2(self, labeled_segments, class_names):
+        # 统计每个类别的片段数量
+        category_counts = {label: [] for label in class_names}
+        for _, _, label, confidence in labeled_segments:
+            category_counts[label].append(confidence)
+
+        # 准备绘图数据
+        labels = list(category_counts.keys())
+        counts = [len(category_counts[label]) for label in labels]
+        avg_confidences = [np.mean(category_counts[label]) if category_counts[label] else 0 for label in labels]
+
+        # 创建分组柱状图
+        fig, ax = plt.subplots(figsize=(10, 6))
+        bars = ax.bar(labels, counts, color=plt.cm.Blues(avg_confidences))
+
+        # 添加置信度标签
+        for bar, confidence in zip(bars, avg_confidences):
+            height = bar.get_height()
+            ax.text(bar.get_x() + bar.get_width() / 2, height, f"{confidence:.2f}", ha='center', va='bottom')
+
+        ax.set_xlabel('Action Categories')
+        ax.set_ylabel('Number of Segments')
+        ax.set_title('Distribution of Video Segments by Category with Confidence smoothed')
+        plt.xticks(rotation=45)
+        plt.tight_layout()
+        plt.show()
+
+    def vis_category_dist(self, labeled_segments, class_names):
+        # 统计每个类别的片段数量
+        category_counts = {label: [] for label in class_names}
+        for _, _, label, confidence in labeled_segments:
+            category_counts[label].append(confidence)
+
+        # 准备绘图数据
+        labels = list(category_counts.keys())
+        counts = [len(category_counts[label]) for label in labels]
+        avg_confidences = [np.mean(category_counts[label]) if category_counts[label] else 0 for label in labels]
+
+        # 创建分组柱状图
+        fig, ax = plt.subplots(figsize=(10, 6))
+        bars = ax.bar(labels, counts, color=plt.cm.Blues(avg_confidences))
+
+        # 添加置信度标签
+        for bar, confidence in zip(bars, avg_confidences):
+            height = bar.get_height()
+            ax.text(bar.get_x() + bar.get_width() / 2, height, f"{confidence:.2f}", ha='center', va='bottom')
+
+        ax.set_xlabel('Action Categories')
+        ax.set_ylabel('Number of Segments')
+        ax.set_title('Distribution of Video Segments by Category with Confidence')
+        plt.xticks(rotation=45)
+        plt.tight_layout()
+        plt.show()
+
     def multi_video_split(self, main_video_path, save_dir):
         pass
 
 
 if __name__ == "__main__":
-    model_path = "./model_result/best_model_0811/C3D_best_epoch-71.pth.tar"
-    video_dir = './dataset/20240728150812'
+    model_path = "./model_result/train36/C3D_last_epoch-200.pth.tar"
+    video_dir = './dataset/20240728150616'
     video_names = [
         "video_1.mp4",
         "video_2.mp4",

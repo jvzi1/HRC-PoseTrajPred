@@ -213,8 +213,8 @@ class ActionRecognizer:
 
 
 if __name__ == "__main__":
-    model_path = "./model_result/train36/C3D_last_epoch-200.pth.tar"
-    video_dir = './dataset/20240728150616'
+    model_path = "./model_result/train38/C3D_best_epoch-113.pth.tar"
+    video_dir = './dataset/20240728150812'
     video_names = [
         "video_1.mp4",
         "video_2.mp4",

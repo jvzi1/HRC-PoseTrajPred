@@ -1,8 +1,7 @@
 import torch
 import torch.nn as nn
 import sys
-print(sys.path)
-from layers import *
+from stgcn.layers import *
 
 
 class STGCNChebGraphConv(nn.Module):

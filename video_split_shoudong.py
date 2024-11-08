@@ -145,7 +145,8 @@ class VideoPlayer(QMainWindow):
         end_time = self.end_frame / self.fps
         
         # 动作标签输入
-        category, ok = QInputDialog.getText(self, '输入动作类别', '请输入动作类别标签:')
+        categories = ["walk", "carry", "measure", "playphone", "crouch", "operate"]
+        category, ok = QInputDialog.getItem(self, '输入动作类别', '请输入动作类别标签:', categories, 0, False)
         if not ok or not category.strip():
             QMessageBox.warning(self, "警告", "标签不能为空！")
             return

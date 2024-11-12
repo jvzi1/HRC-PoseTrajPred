@@ -14,6 +14,15 @@ POSE_LANDMARKS = [
     "left_thumb", "right_thumb", "left_hip", "right_hip", "left_knee", "right_knee", "left_ankle", "right_ankle",
     "left_heel", "right_heel", "left_foot_index", "right_foot_index"
 ]
+
+SELECTED_INDICES = [0, 2, 5, 7, 8, 11, 12, 13, 14, 15, 16, 23, 24, 25, 26, 27, 28]
+SELECTED_LANDMARKS = [
+    "nose", "left_eye", "right_eye", "left_ear", "right_ear",
+    "left_shoulder", "right_shoulder", "left_elbow", "right_elbow",
+    "left_wrist", "right_wrist", "left_hip", "right_hip",
+    "left_knee", "right_knee", "left_ankle", "right_ankle"
+]
+
 def process_video(video_path, output_dir):
     cap = cv2.VideoCapture(video_path)
     frame_data = []
@@ -34,9 +43,10 @@ def process_video(video_path, output_dir):
         if result.pose_landmarks:
             landmarks = result.pose_landmarks.landmark
             keypoints = []
-            for idx, lm in enumerate(landmarks):
+            for idx, lm_idx in enumerate(SELECTED_INDICES):
+                lm = landmarks[lm_idx]
                 keypoints.append({
-                    'name': POSE_LANDMARKS[idx],
+                    'name': SELECTED_LANDMARKS[idx],
                     'x': lm.x,
                     'y': lm.y,
                     'z': lm.z,
@@ -74,5 +84,5 @@ def process_batch_videos(folder_path):
 
 if __name__ == '__main__':
 
-    folder = r'F:\video_rec_new\rec_728'
+    folder = r'F:\video_rec_new\data\rec_1105'
     process_batch_videos(folder)

@@ -4,12 +4,15 @@ import torch.nn as nn
 class DynamicTrajectoryHead(nn.Module):
     def __init__(self, embed_size, num_joints, pred_length):
         super(DynamicTrajectoryHead, self).__init__()
+
+        self.pred_length = pred_length
+        self.num_joints = num_joints
         
         # 自注意力层，用于计算每个时间步的注意力权重
         self.attention = nn.MultiheadAttention(embed_size, num_heads=4, batch_first=True)
         
         # 用于从注意力加权后的特征中预测未来轨迹
-        self.fc_out = nn.Linear(embed_size, num_joints * 2 * pred_length)
+        self.fc_out = nn.Linear(embed_size, num_joints * 3 * pred_length)
         
     def forward(self, x):
         """
@@ -20,8 +23,8 @@ class DynamicTrajectoryHead(nn.Module):
         attention_output = attention_output.mean(dim=1)  # 对时间维度求平均，得到全局的轨迹特征
         
         # 动态生成未来轨迹
-        output = self.fc_out(attention_output)  # [batch_size, num_joints * 2 * pred_length]
-        return output.view(output.size(0), pred_length, -1, 2)  # [batch_size, pred_length, num_joints, 2]
+        output = self.fc_out(attention_output)  # [batch_size, num_joints * 3 * pred_length]
+        return output.view(output.size(0), self.pred_length, self.num_joints * 3)  # [batch_size, pred_length, num_joints * 3]
 
 
 class TrajectoryTransformer(nn.Module):
@@ -29,8 +32,10 @@ class TrajectoryTransformer(nn.Module):
                  behavior_vocab_size, behavior_embed_size, pred_length, lstm_hidden_size, lstm_num_layers):
         super(TrajectoryTransformer, self).__init__()
         
+
+
         # 轨迹数据输入线性层，将输入关键点位置映射到 embed_size
-        self.trajectory_embedding = nn.Linear(num_joints * 2, embed_size)  # 每个关键点 (x, y)
+        self.trajectory_embedding = nn.Linear(num_joints * 3, embed_size)  # 每个关键点 (x, y, z)
         
         # 行为标签嵌入层
         self.behavior_embedding = nn.Embedding(behavior_vocab_size, behavior_embed_size)
@@ -51,7 +56,7 @@ class TrajectoryTransformer(nn.Module):
     
     def forward(self, trajectory, behavior):
         # 轨迹数据 embedding
-        # trajectory: [batch_size, seq_len, num_joints * 2]
+        # trajectory: [batch_size, seq_len, num_joints * 3]
         trajectory_embedded = self.trajectory_embedding(trajectory)  # [batch_size, seq_len, embed_size]
         
         # 行为标签 embedding

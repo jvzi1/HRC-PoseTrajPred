@@ -1,6 +1,6 @@
 import matplotlib.pyplot as plt
 import torch
-from trajectory_dataloader import TrajectoryDataset
+from tracking.trajectory_dataloader import TrajectoryDataset
 from torch.utils.data import DataLoader
 from transformer import TrajectoryTransformer
 def plot_trajectory(real_traj, predicted_traj):

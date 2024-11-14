@@ -9,8 +9,8 @@ from torch.autograd import Variable
 from tqdm import tqdm
 # from tensorboardX import SummaryWriter
 from loguru import logger
-from datatime import datatime
-from dataset import VideoDataset 
+from datetime import datetime
+from dataset import VideoDataset
 import C3D_model  
 from config import CONFIG
 # 创建训练目录

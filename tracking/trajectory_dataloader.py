@@ -41,14 +41,19 @@ class TrajectoryDataset(Dataset):
     
     def __getitem__(self, idx):
         # 获取输入的轨迹序列
-        trajectory = self.trajectories[idx][:self.seq_len]  # [seq_len, num_joints * 3]
+        trajectory = self.trajectories[idx][:self.seq_len]  #  [seq_len, num_joints, 3]
         behavior = self.behaviors[idx]
-        future_trajectory = self.trajectories[idx][self.seq_len:self.seq_len + self.pred_len]  # [pred_len, num_joints * 3]
+        future_trajectory = self.trajectories[idx][self.seq_len:self.seq_len + self.pred_len]  # [pred_len, num_joints, 3]
 
         # 将数据转换为 tensor
         trajectory = torch.tensor(trajectory, dtype=torch.float32).view(self.seq_len, -1)  # [seq_len, num_joints * 3]
         future_trajectory = torch.tensor(future_trajectory, dtype=torch.float32).view(self.pred_len, -1)  # [pred_len, num_joints * 3]
         behavior = torch.tensor(behavior, dtype=torch.long)
+
+        # TODO 看是否可以修改维度让我的输入可以不用把最后一位 置为-1
+        # trajectory = torch.tensor(trajectory, dtype=torch.float32)  # [seq_len, num_joints, 3]
+        # future_trajectory = torch.tensor(future_trajectory, dtype=torch.float32)  # [pred_len, num_joints, 3]
+        # behavior = torch.tensor(behavior, dtype=torch.long)
         
         return trajectory, behavior, future_trajectory
     
@@ -80,7 +85,6 @@ class TrajectoryDataset(Dataset):
                                             all_behaviors.append(label)
                                             # TODO
                                             all_future_trajectories.append(keypoints_trajectory)
-        
         self.split_data(all_trajectories, all_behaviors, all_future_trajectories)
 
     def split_data(self, trajectories, behaviors, future_trajectories):
@@ -126,7 +130,7 @@ class TrajectoryDataset(Dataset):
         return keypoints_trajectory
     
 if __name__ == "__main__":
-    dataset_path = r"F:\video_rec_new\dataset\rec_728"
+    dataset_path = r"F:\video_rec_new\data\rec_728"
     seq_len = 10  # 输入轨迹的长度
     pred_len = 5  # 预测轨迹的长度
     

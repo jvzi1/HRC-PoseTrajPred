@@ -70,11 +70,22 @@ def predict_trajectory(model, trajectory_input):
     return predicted_trajectory
 
 
-def visualize_result(frame, keypoints, predicted_trajectory):
-    """在视频帧上绘制关键点和预测轨迹"""
+def visualize_result(frame, keypoints, predicted_trajectory, history_buffer=None):
+    """
+    在视频帧上绘制关键点和预测轨迹，同时显示历史轨迹与未来预测融合。
+    
+    Args:
+        frame: 当前帧图像。
+        keypoints: 原始关键点数据，形状为 [num_joints, 3]。
+        predicted_trajectory: 模型预测的未来轨迹，形状为 [pred_len, num_joints, 3]。
+        history_buffer: 历史关键点数据，用于绘制历史轨迹。
+        
+    Returns:
+        带可视化结果的图像帧。
+    """
     if keypoints.shape[1] != 3:
         raise ValueError("关键点数据应为 [num_joints, 3] 形状")
-    
+
     skeleton = [
         (1, 2), (2, 3), (4, 5), (5, 6), (9, 10), (11, 12), (11, 13), 
         (11, 23), (12, 14), (12, 24), (13, 15), (14, 16), (15, 17),
@@ -83,16 +94,24 @@ def visualize_result(frame, keypoints, predicted_trajectory):
         (28, 30), (28, 32)
     ]
 
+    # 绘制当前帧关键点
     for x, y, z in keypoints:
         cv2.circle(frame, (int(x * frame.shape[1]), int(y * frame.shape[0])), 2, (0, 255, 0), -1)
 
+    # 绘制历史轨迹（如果提供）
+    if history_buffer is not None:
+        for t, history_keypoints in enumerate(history_buffer):
+            alpha = 1.0 - t / len(history_buffer)  # 随时间渐变透明
+            color = (0, int(255 * alpha), int(255 * alpha))  # 淡蓝色
+            for x, y, z in history_keypoints:
+                cv2.circle(frame, (int(x * frame.shape[1]), int(y * frame.shape[0])), 2, color, -1)
+
+    # 绘制预测轨迹
     if predicted_trajectory is not None:
         predicted_trajectory = predicted_trajectory.reshape(-1, 33, 3)
         num_predictions = predicted_trajectory.shape[0]
         for t in range(num_predictions):
             predicted_keypoints = predicted_trajectory[t]
-            
-            # 计算颜色的渐变值，从红色 (255, 0, 0) 渐变到淡红色 (255, 200, 200)
             r = 255
             g = int(200 * (t / num_predictions))
             b = int(200 * (t / num_predictions))
@@ -101,24 +120,17 @@ def visualize_result(frame, keypoints, predicted_trajectory):
             # 绘制每个预测帧的关键点
             for idx, predicted_keypoint in enumerate(predicted_keypoints):
                 x, y, z = predicted_keypoint
-                if idx == 0:
-                    cv2.circle(frame, (int(x * frame.shape[1]), int(y * frame.shape[0])), 4, color, -1)
                 cv2.circle(frame, (int(x * frame.shape[1]), int(y * frame.shape[0])), 2, color, -1)
+
             # 绘制骨架连接
             for start, end in skeleton:
                 start_point = predicted_keypoints[start]
                 end_point = predicted_keypoints[end]
                 cv2.line(frame, (int(start_point[0] * frame.shape[1]), int(start_point[1] * frame.shape[0])),
                          (int(end_point[0] * frame.shape[1]), int(end_point[1] * frame.shape[0])), color, 1)
-            # 绘制脖子
-            start = (predicted_keypoints[9] + predicted_keypoints[10]) / 2
-            end = (predicted_keypoints[11] + predicted_keypoints[12]) / 2
-            cv2.line(frame, (int(start[0] * frame.shape[1]), int(start[1] * frame.shape[0])),
-                     (int(end[0] * frame.shape[1]), int(end[1] * frame.shape[0])), color, 3)
-            
-
 
     return frame
+
 
 
 def infer_from_json(model, json_path, video_path, output_path, speed=100):
@@ -142,15 +154,11 @@ def infer_from_json(model, json_path, video_path, output_path, speed=100):
     frame_height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
     fps = cap.get(cv2.CAP_PROP_FPS)
     fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-
     out = cv2.VideoWriter(output_path, fourcc, fps, (frame_width, frame_height))
-    seq_buffer = keypoint_data[:seq_len].tolist()
-    frame_idx = 0
-    processed_frames = 0
 
-    while len(seq_buffer) < seq_len and frame_idx < len(keypoint_data):
-        seq_buffer.append(keypoint_data[frame_idx])
-        frame_idx += 1
+    seq_buffer = keypoint_data[:seq_len].tolist()
+    history_buffer = []  # 保存历史轨迹
+    frame_idx = 0
 
     while frame_idx < len(keypoint_data):
         if len(seq_buffer) < seq_len:
@@ -161,31 +169,25 @@ def infer_from_json(model, json_path, video_path, output_path, speed=100):
 
         ret, frame = cap.read()
         if not ret:
-            print(f"无法读取帧 {frame_idx}, 提前结束处理。")
             break
 
         current_keypoints = np.array(keypoint_data[frame_idx])
         if current_keypoints.shape == (num_joints * 3,):
             current_keypoints = current_keypoints.reshape(num_joints, 3)
 
-        predicted_trajectory = predicted_trajectory[0]  # predicted_trajectory.shape=(1, pred_len, 99)
+        # 滑动窗口：更新 seq_buffer，融合预测结果
+        predicted_trajectory_flat = predicted_trajectory.reshape(pred_len, -1)  # [pred_len, num_joints * 3]
+        seq_buffer = seq_buffer[-seq_len // 2:] + predicted_trajectory_flat.tolist()[:seq_len // 2]
 
-        try:
-            frame = visualize_result(frame, current_keypoints, predicted_trajectory)
-            out.write(frame)
-            processed_frames += 1
-        except Exception as e:
-            print(f"帧 {frame_idx} 处理出错: {e}")
-        
-        delay = int(speed)
-        cv2.imshow('Prediction', frame)
-        if cv2.waitKey(delay) & 0xFF == ord('q'):
-            print("用户终止处理。")
-            break
+        # 更新历史轨迹缓冲区
+        history_buffer.append(current_keypoints)
+        if len(history_buffer) > 10:  # 保留最近 10 帧的历史轨迹
+            history_buffer.pop(0)
 
-        # 移除上一帧添加下一帧
-        seq_buffer = seq_buffer[1:]
-        seq_buffer.append(keypoint_data[frame_idx])
+        # 可视化并写入结果
+        frame = visualize_result(frame, current_keypoints, predicted_trajectory, history_buffer)
+        out.write(frame)
+
         frame_idx += 1
 
     cap.release()
@@ -203,7 +205,7 @@ def infer_from_json(model, json_path, video_path, output_path, speed=100):
     else:
         print(f"预测结果未能正确保存到 {output_path}，请检查路径和写入逻辑。")
 
-    print(f"总共处理了 {processed_frames} 帧。")
+
 
 
 

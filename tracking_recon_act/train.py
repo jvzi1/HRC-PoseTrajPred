@@ -1,13 +1,14 @@
 import torch.optim as optim
 import torch.nn as nn
 from trajectory_dataloader import TrajectoryDataset
-from transformer import TrajectoryTransformer
 from torch.utils.data import DataLoader
 import torch
 from loguru import logger 
 import os
 import time
 from tqdm import tqdm
+from act_models import MultiModalTrajectoryPredictor
+
 # 初始化模型参数
 num_joints = 33  # 人体关键点的数量
 embed_size = 128  # 轨迹嵌入的大小
@@ -16,27 +17,19 @@ num_layers = 4  # Transformer 层数
 behavior_vocab_size = 6  # 行为标签数量
 behavior_embed_size = 64  # 行为嵌入向量的大小
 # pred_length = 5  # 预测未来轨迹的长度
-dataset_path = r"F:\video_rec_new\data\rec_728"
-seq_len = 40  # 输入轨迹的长度
+dataset_path = r"F:\video_rec_new\data\rec_tiny"
+seq_len = 20  # 输入轨迹的长度
 pred_len = 8  # 预测轨迹的长度
 lstm_hidden_size = 256 # LSTM隐藏层
 lstm_num_layers = 2 # LSTM的层数
 lr = 1e-4
-step_size = 20
+step_size = 10
 
 # 初始化模型
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-model = TrajectoryTransformer(
-    num_joints=num_joints,
-    embed_size=embed_size,
-    num_heads=num_heads,
-    num_layers=num_layers,
-    behavior_vocab_size=behavior_vocab_size,
-    behavior_embed_size=behavior_embed_size,
-    pred_length=pred_len,
-    lstm_hidden_size = lstm_hidden_size,
-    lstm_num_layers = lstm_num_layers,
-).to(device)
+
+model = MultiModalTrajectoryPredictor(seq_len=seq_len, pred_len=pred_len, behavior_num_classes=behavior_vocab_size, hidden_dim=256)
+
 
 criterion = nn.MSELoss()
 optimizer = optim.Adam(model.parameters(), lr=lr) # 尝试修改optim参数，尝试使用AdamW优化器
@@ -51,23 +44,6 @@ test_loader  = DataLoader(test_dataset, batch_size=2, shuffle=True)
 logger.info("finish data process")
 
 model.to(device)
-
-def evaluate(model, val_loader):
-    model.eval()
-    total_loss = 0.0
-    total_samples = 0
-    with torch.no_grad():
-        for trajectory, behavior, future_trajectory in val_loader:
-            trajectory = trajectory.to(device)
-            behavior = behavior.to(device)
-            future_trajectory = future_trajectory.to(device)
-
-            predicted_trajectory = model(trajectory, behavior)
-            loss = compute_loss(predicted_trajectory, future_trajectory)
-            total_loss += loss.item() * trajectory.size(0)
-            total_samples += trajectory.size(0)
-    assert total_samples == len(val_loader.dataset)
-    return total_loss / total_samples
 
 def compute_loss(predicted, target):
     """
@@ -94,18 +70,19 @@ last_model_path = "model_result/trajectory/last_model.pth"
 
 logger.info("start training")
 # 训练循环
-num_epochs = 100
+num_epochs = 30
 for epoch in range(num_epochs):
     model.train()
     running_loss = 0.0
     train_loader_tqdm = tqdm(train_loader, desc=f"Epoch {epoch + 1}/{num_epochs}", unit="batch")
-    for trajectory, behavior, future_trajectory in train_loader_tqdm:
+    for trajectory, behavior, future_trajectory, images in train_loader_tqdm:
         trajectory = trajectory.to(device)
         behavior = behavior.to(device)
         future_trajectory = future_trajectory.to(device)
+        images = images.to(device)
         # 前向传播
-        predicted_trajectory = model(trajectory, behavior)
-        loss = compute_loss(predicted_trajectory, future_trajectory)
+        predicted_trajectory = model(trajectory, images, behavior)
+        loss = criterion(predicted_trajectory, future_trajectory)
         
         # 反向传播
         optimizer.zero_grad()
@@ -113,8 +90,23 @@ for epoch in range(num_epochs):
         optimizer.step()
         
         running_loss += loss.item() * trajectory.size(0)
-    train_loss = running_loss / len(train_loader.dataset)
-    val_loss = evaluate(model, val_loader)
+    train_loss = running_loss / len(train_loader.dataset) * 100
+    model.eval()
+    running_loss = 0.0
+    with torch.no_grad():
+        for trajectory, behavior, future_trajectory, images in val_loader:
+            trajectory = trajectory.to(device)
+            behavior = behavior.to(device)
+            future_trajectory = future_trajectory.to(device)
+            images = images.to(device)
+
+            predicted_trajectory = model(trajectory, images, behavior)
+            loss = criterion(predicted_trajectory, future_trajectory)
+
+            running_loss += loss.item() * trajectory.size(0)
+        
+    val_loss = running_loss / len(val_loader.dataset) * 100
+
     
     # print(f'Epoch [{epoch+1}/{num_epochs}], Loss: {running_loss / len(train_loader.dataset)}')
     print(f'Epoch {epoch + 1}/{num_epochs}, Train Loss: {train_loss:.4f}, Val Loss: {val_loss:.4f}')
@@ -138,6 +130,20 @@ for epoch in range(num_epochs):
         'loss': val_loss
     }, last_model_path)
 # 测试模型
-test_loss = evaluate(model, test_loader)
+model.eval()
+running_loss = 0.0
+with torch.no_grad():
+    for trajectory, behavior, future_trajectory, images in test_loader:
+        trajectory = trajectory.to(device)
+        behavior = behavior.to(device)
+        future_trajectory = future_trajectory.to(device)
+        images = images.to(device)
+
+        predicted_trajectory = model(trajectory, images, behavior)
+        loss = criterion(predicted_trajectory, future_trajectory)
+
+        running_loss += loss.item() * trajectory.size(0)
+    
+test_loss = running_loss / len(test_loader.dataset) * 100
 print(f'Test Loss: {test_loss:.4f}')
 

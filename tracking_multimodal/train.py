@@ -1,13 +1,13 @@
 import torch.optim as optim
 import torch.nn as nn
-from trajectory_dataloader import TrajectoryDataset
+from trajectory_dataset import TrajectoryDataset
 from torch.utils.data import DataLoader
 import torch
 from loguru import logger 
 import os
 import time
 from tqdm import tqdm
-from act_models import MultiModalTrajectoryPredictor
+from multimodal_models import MultiModalTrajectoryPredictor
 
 # 初始化模型参数
 num_joints = 33  # 人体关键点的数量
@@ -17,7 +17,7 @@ num_layers = 4  # Transformer 层数
 behavior_vocab_size = 6  # 行为标签数量
 behavior_embed_size = 64  # 行为嵌入向量的大小
 # pred_length = 5  # 预测未来轨迹的长度
-dataset_path = r"F:\video_rec_new\data\rec_tiny"
+dataset_path = r"F:\video_rec_new\data\rec_728"
 seq_len = 20  # 输入轨迹的长度
 pred_len = 8  # 预测轨迹的长度
 lstm_hidden_size = 256 # LSTM隐藏层

@@ -3,7 +3,10 @@ import json
 import torch
 import numpy as np
 import cv2
-from transformer import TrajectoryTransformer
+import sys
+print(sys.path)
+from trajectory_model import TrajectoryTransformerModel
+from loguru import logger 
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 num_joints = 33
@@ -19,7 +22,7 @@ lstm_num_layers = 2
 
 def initialize_model(model_path):
     """初始化并加载轨迹预测模型"""
-    model = TrajectoryTransformer(
+    model = TrajectoryTransformerModel(
         num_joints=num_joints,
         embed_size=embed_size,
         num_heads=num_heads,
@@ -70,11 +73,22 @@ def predict_trajectory(model, trajectory_input):
     return predicted_trajectory
 
 
-def visualize_result(frame, keypoints, predicted_trajectory):
-    """在视频帧上绘制关键点和预测轨迹"""
+def visualize_result(frame, keypoints, predicted_trajectory, history_buffer=None):
+    """
+    在视频帧上绘制关键点和预测轨迹，同时显示历史轨迹与未来预测融合。
+    
+    Args:
+        frame: 当前帧图像。
+        keypoints: 原始关键点数据，形状为 [num_joints, 3]。
+        predicted_trajectory: 模型预测的未来轨迹，形状为 [pred_len, num_joints, 3]。
+        history_buffer: 历史关键点数据，用于绘制历史轨迹。
+        
+    Returns:
+        带可视化结果的图像帧。
+    """
     if keypoints.shape[1] != 3:
         raise ValueError("关键点数据应为 [num_joints, 3] 形状")
-    
+
     skeleton = [
         (1, 2), (2, 3), (4, 5), (5, 6), (9, 10), (11, 12), (11, 13), 
         (11, 23), (12, 14), (12, 24), (13, 15), (14, 16), (15, 17),
@@ -83,16 +97,25 @@ def visualize_result(frame, keypoints, predicted_trajectory):
         (28, 30), (28, 32)
     ]
 
+    # 绘制当前帧关键点
     for x, y, z in keypoints:
         cv2.circle(frame, (int(x * frame.shape[1]), int(y * frame.shape[0])), 2, (0, 255, 0), -1)
 
+    # 绘制历史轨迹（如果提供）
+    if history_buffer is not None:
+        for t, history_keypoints in enumerate(history_buffer):
+            alpha = 1.0 - t / len(history_buffer)  # 随时间渐变透明
+            color = (0, int(255 * alpha), int(255 * alpha))  # 淡蓝色
+            for x, y, z in history_keypoints:
+                cv2.circle(frame, (int(x * frame.shape[1]), int(y * frame.shape[0])), 2, color, -1)
+
+    # 绘制预测轨迹
     if predicted_trajectory is not None:
+        predicted_trajectory = np.array(predicted_trajectory)
         predicted_trajectory = predicted_trajectory.reshape(-1, 33, 3)
         num_predictions = predicted_trajectory.shape[0]
         for t in range(num_predictions):
             predicted_keypoints = predicted_trajectory[t]
-            
-            # 计算颜色的渐变值，从红色 (255, 0, 0) 渐变到淡红色 (255, 200, 200)
             r = 255
             g = int(200 * (t / num_predictions))
             b = int(200 * (t / num_predictions))
@@ -101,27 +124,28 @@ def visualize_result(frame, keypoints, predicted_trajectory):
             # 绘制每个预测帧的关键点
             for idx, predicted_keypoint in enumerate(predicted_keypoints):
                 x, y, z = predicted_keypoint
-                if idx == 0:
-                    cv2.circle(frame, (int(x * frame.shape[1]), int(y * frame.shape[0])), 4, color, -1)
                 cv2.circle(frame, (int(x * frame.shape[1]), int(y * frame.shape[0])), 2, color, -1)
+
             # 绘制骨架连接
             for start, end in skeleton:
                 start_point = predicted_keypoints[start]
                 end_point = predicted_keypoints[end]
                 cv2.line(frame, (int(start_point[0] * frame.shape[1]), int(start_point[1] * frame.shape[0])),
                          (int(end_point[0] * frame.shape[1]), int(end_point[1] * frame.shape[0])), color, 1)
-            # 绘制脖子
-            start = (predicted_keypoints[9] + predicted_keypoints[10]) / 2
-            end = (predicted_keypoints[11] + predicted_keypoints[12]) / 2
-            cv2.line(frame, (int(start[0] * frame.shape[1]), int(start[1] * frame.shape[0])),
-                     (int(end[0] * frame.shape[1]), int(end[1] * frame.shape[0])), color, 3)
-            
-
 
     return frame
 
 
-def infer_from_json(model, json_path, video_path, output_path, speed=100):
+from time import time 
+
+def gaussian_weights(length):
+    """生成高斯分布权重"""
+    x = np.linspace(-2, 2, length)  # 标准正态分布范围 [-2, 2]
+    weights = np.exp(-x**2 / 2)  # 高斯分布公式
+    weights /= np.sum(weights)  # 归一化
+    return weights
+
+def infer_from_json(model, json_path, video_path, output_path, speed=100, iterations = 5):
     """从 JSON 文件加载关键点数据并进行轨迹预测"""
     with open(json_path, 'r') as f:
         json_data = json.load(f)
@@ -142,52 +166,49 @@ def infer_from_json(model, json_path, video_path, output_path, speed=100):
     frame_height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
     fps = cap.get(cv2.CAP_PROP_FPS)
     fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-
     out = cv2.VideoWriter(output_path, fourcc, fps, (frame_width, frame_height))
+
     seq_buffer = keypoint_data[:seq_len].tolist()
     frame_idx = 0
-    processed_frames = 0
-
-    while len(seq_buffer) < seq_len and frame_idx < len(keypoint_data):
-        seq_buffer.append(keypoint_data[frame_idx])
-        frame_idx += 1
 
     while frame_idx < len(keypoint_data):
         if len(seq_buffer) < seq_len:
             break  # 如果剩余帧不足 seq_len，则停止
 
-        trajectory_input = preprocess_keypoints(seq_buffer)
-        predicted_trajectory = predict_trajectory(model, trajectory_input)
-
         ret, frame = cap.read()
         if not ret:
-            print(f"无法读取帧 {frame_idx}, 提前结束处理。")
             break
-
+        a = time()
         current_keypoints = np.array(keypoint_data[frame_idx])
         if current_keypoints.shape == (num_joints * 3,):
             current_keypoints = current_keypoints.reshape(num_joints, 3)
 
-        predicted_trajectory = predicted_trajectory[0]  # predicted_trajectory.shape=(1, pred_len, 99)
+        # 多次迭代预测
+        predicted_trajectories = []  
+        weights = gaussian_weights(pred_len)  
+        half_pred_len = pred_len // 2  
 
-        try:
-            frame = visualize_result(frame, current_keypoints, predicted_trajectory)
-            out.write(frame)
-            processed_frames += 1
-        except Exception as e:
-            print(f"帧 {frame_idx} 处理出错: {e}")
+        trajectory_input = preprocess_keypoints(seq_buffer)
         
-        delay = int(speed)
-        cv2.imshow('Prediction', frame)
-        if cv2.waitKey(delay) & 0xFF == ord('q'):
-            print("用户终止处理。")
-            break
+        for _ in range(iterations):
+            predicted_trajectory = predict_trajectory(model, trajectory_input)
+            predicted_trajectories.append(predicted_trajectory[0].reshape(pred_len, num_joints, 3))
 
-        # 移除上一帧添加下一帧
-        seq_buffer = seq_buffer[1:]
-        seq_buffer.append(keypoint_data[frame_idx])
+            # 将预测结果融合到输入中，形成新的输入
+            predicted_trajectory_flat = predicted_trajectory.reshape(pred_len, -1)
+            trajectory_input = preprocess_keypoints(
+                np.vstack([seq_buffer[-(seq_len - pred_len):], predicted_trajectory_flat])
+            )
+        # TODO 根据预测的时序添加权重融合，每一帧的关键点位置，根据权重加权求出拟合位置
+        
+        # 可视化结果并写入视频
+        frame = visualize_result(frame, current_keypoints, predicted_trajectories)
+        out.write(frame)
+
+        # 更新缓冲区
+        seq_buffer = seq_buffer[1:] + [keypoint_data[frame_idx]]
         frame_idx += 1
-
+        logger.info(f"detect time: {time() - a}")
     cap.release()
     out.release()
     cv2.destroyAllWindows()
@@ -203,15 +224,15 @@ def infer_from_json(model, json_path, video_path, output_path, speed=100):
     else:
         print(f"预测结果未能正确保存到 {output_path}，请检查路径和写入逻辑。")
 
-    print(f"总共处理了 {processed_frames} 帧。")
+
 
 
 
 
 if __name__ == "__main__":
-    json_path = r"F:\video_rec_new\data\rec_728\20240728141330\annotated_videos\0\1\video_1_0_1_keypoints.json"
-    video_path = r"F:\video_rec_new\data\rec_728\20240728141330\annotated_videos\0\1\video_1_0_1.mp4"
-    output_path = r"F:\video_rec_new\data\test\output_prediction.mp4"
+    json_path = r"F:\video_rec_new\data\rec_728\20240728141330\annotated_videos\3\1\video_1_3_1_keypoints.json"
+    video_path = r"F:\video_rec_new\data\rec_728\20240728141330\annotated_videos\3\1\video_1_3_1.mp4"
+    output_path = r"F:\video_rec_new\data\test\output_prediction_3.mp4"
     model_path = "model_result/trajectory/last_model_8.pth"
     model = initialize_model(model_path)
 

@@ -3,7 +3,8 @@ import json
 import torch
 import numpy as np
 import cv2
-from transformer import TrajectoryTransformer
+from trajectory_model import TrajectoryTransformerModel
+from loguru import logger 
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 num_joints = 33
@@ -19,7 +20,7 @@ lstm_num_layers = 2
 
 def initialize_model(model_path):
     """初始化并加载轨迹预测模型"""
-    model = TrajectoryTransformer(
+    model = TrajectoryTransformerModel(
         num_joints=num_joints,
         embed_size=embed_size,
         num_heads=num_heads,
@@ -108,6 +109,7 @@ def visualize_result(frame, keypoints, predicted_trajectory, history_buffer=None
 
     # 绘制预测轨迹
     if predicted_trajectory is not None:
+        predicted_trajectory = np.array(predicted_trajectory)
         predicted_trajectory = predicted_trajectory.reshape(-1, 33, 3)
         num_predictions = predicted_trajectory.shape[0]
         for t in range(num_predictions):
@@ -132,8 +134,46 @@ def visualize_result(frame, keypoints, predicted_trajectory, history_buffer=None
     return frame
 
 
+from time import time 
 
-def infer_from_json(model, json_path, video_path, output_path, speed=100):
+def smooth_predictions(all_predictions, weight_matrix):
+    """
+    对预测轨迹进行加权平滑。
+    
+    Args:
+        all_predictions: 所有预测的轨迹，列表形式，每项为 [pred_len, num_joints, 3]。
+        weight_matrix: 权重矩阵，列表形式，每项为 [pred_len]。
+    
+    Returns:
+        平滑后的预测轨迹，形状为 [total_pred_len, num_joints, 3]。
+    """
+    num_frames = sum([pred.shape[0] for pred in all_predictions])  # 总帧数
+    smoothed_trajectory = np.zeros((num_frames, num_joints, 3))  # 初始化平滑轨迹
+    weight_sum = np.zeros(num_frames)  # 累计权重
+
+    current_idx = 0
+    for i, (pred, weights) in enumerate(zip(all_predictions, weight_matrix)):
+        pred_len = pred.shape[0]
+        for t in range(pred_len):
+            smoothed_trajectory[current_idx + t] += pred[t] * weights[t]
+            weight_sum[current_idx + t] += weights[t]
+        current_idx += pred_len
+
+    # 归一化
+    for i in range(num_frames):
+        smoothed_trajectory[i] /= weight_sum[i]
+
+    return smoothed_trajectory
+
+
+def gaussian_weights(length):
+    """生成高斯分布权重"""
+    x = np.linspace(-2, 2, length)  # 标准正态分布范围 [-2, 2]
+    weights = np.exp(-x**2 / 2)  # 高斯分布公式
+    weights /= np.sum(weights)  # 归一化
+    return weights
+
+def infer_from_json(model, json_path, video_path, output_path, speed=100, iterations = 5):
     """从 JSON 文件加载关键点数据并进行轨迹预测"""
     with open(json_path, 'r') as f:
         json_data = json.load(f)
@@ -143,7 +183,7 @@ def infer_from_json(model, json_path, video_path, output_path, speed=100):
     output_dir = os.path.dirname(output_path)
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
-        print(f"输出目录已创建: {output_dir}")
+        print(f"Success create output savedir: {output_dir}")
 
     cap = cv2.VideoCapture(video_path)
     if not cap.isOpened():
@@ -157,39 +197,59 @@ def infer_from_json(model, json_path, video_path, output_path, speed=100):
     out = cv2.VideoWriter(output_path, fourcc, fps, (frame_width, frame_height))
 
     seq_buffer = keypoint_data[:seq_len].tolist()
-    history_buffer = []  # 保存历史轨迹
     frame_idx = 0
+
+    # 保存权重和预测帧
+    all_predictions = []
+    weight_matrix = []
 
     while frame_idx < len(keypoint_data):
         if len(seq_buffer) < seq_len:
             break  # 如果剩余帧不足 seq_len，则停止
 
-        trajectory_input = preprocess_keypoints(seq_buffer)
-        predicted_trajectory = predict_trajectory(model, trajectory_input)
-
         ret, frame = cap.read()
         if not ret:
             break
-
+        a = time()
         current_keypoints = np.array(keypoint_data[frame_idx])
         if current_keypoints.shape == (num_joints * 3,):
             current_keypoints = current_keypoints.reshape(num_joints, 3)
 
-        # 滑动窗口：更新 seq_buffer，融合预测结果
-        predicted_trajectory_flat = predicted_trajectory.reshape(pred_len, -1)  # [pred_len, num_joints * 3]
-        seq_buffer = seq_buffer[-seq_len // 2:] + predicted_trajectory_flat.tolist()[:seq_len // 2]
+        # 多次迭代预测
+        predicted_trajectories = []  
+        weights = gaussian_weights(pred_len)  
+        half_pred_len = pred_len // 2  
 
-        # 更新历史轨迹缓冲区
-        history_buffer.append(current_keypoints)
-        if len(history_buffer) > 10:  # 保留最近 10 帧的历史轨迹
-            history_buffer.pop(0)
+        trajectory_input = preprocess_keypoints(seq_buffer)
+        
+        for iteration in range(iterations):
+            predicted_trajectory = predict_trajectory(model, trajectory_input)
+            predicted_trajectories.append(predicted_trajectory[0].reshape(pred_len, num_joints, 3))
+            weight_matrix.append(weights)
 
-        # 可视化并写入结果
-        frame = visualize_result(frame, current_keypoints, predicted_trajectory, history_buffer)
+            new_predicted_keypoints = predicted_trajectory[0][:4].reshape(-1, num_joints * 3)
+
+            seq_buffer = seq_buffer[4:] + new_predicted_keypoints.tolist()
+            assert len(seq_buffer) == seq_len
+
+            # 当前预测序列的前一半
+            trajectory_input = preprocess_keypoints(seq_buffer)
+
+        all_predictions.extend(predicted_trajectories)
+
+
+        # TODO 根据预测的时序添加权重融合，每一帧的关键点位置，根据权重加权求出拟合位置
+        
+        # 可视化结果并写入视频
+        smoothed_trajectory = smooth_predictions(all_predictions, weight_matrix)
+        frame = visualize_result(frame, current_keypoints, smoothed_trajectory)
         out.write(frame)
 
+        # 更新缓冲区
+        seq_buffer = seq_buffer[1:] + [keypoint_data[frame_idx]]
         frame_idx += 1
-
+        logger.info(f"Processed frame {frame_idx}")
+        logger.info(f"detect time cost: {time() - a}")
     cap.release()
     out.release()
     cv2.destroyAllWindows()
@@ -213,7 +273,7 @@ def infer_from_json(model, json_path, video_path, output_path, speed=100):
 if __name__ == "__main__":
     json_path = r"F:\video_rec_new\data\rec_728\20240728141330\annotated_videos\0\1\video_1_0_1_keypoints.json"
     video_path = r"F:\video_rec_new\data\rec_728\20240728141330\annotated_videos\0\1\video_1_0_1.mp4"
-    output_path = r"F:\video_rec_new\data\test\output_prediction.mp4"
+    output_path = r"F:\video_rec_new\data\test\output_prediction_new.mp4"
     model_path = "model_result/trajectory/last_model_8.pth"
     model = initialize_model(model_path)
 

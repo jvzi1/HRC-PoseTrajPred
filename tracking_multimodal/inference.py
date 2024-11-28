@@ -1,7 +1,7 @@
 import cv2
 import torch
 import numpy as np
-from act_models import MultiModalTrajectoryPredictor  
+from multimodal_models import MultiModalTrajectoryPredictor  
 import json
 class BehaviorAndTrajectoryVisualizer:
     def __init__(self, model_path, device='cuda'):

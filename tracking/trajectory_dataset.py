@@ -22,6 +22,7 @@ class TrajectoryDataset(Dataset):
         self.trajectories = []
         self.behaviors = []  # 行为标签
         self.future_trajectories = []  # 未来的轨迹数据
+        self.camera_names = [] # 相机名称标签
 
         # 划分数据集
         self.train_ratio = train_ratio
@@ -38,12 +39,10 @@ class TrajectoryDataset(Dataset):
         trajectory = torch.tensor(self.trajectories[idx], dtype=torch.float32).view(self.seq_len, -1)
         future_trajectory = torch.tensor(self.future_trajectories[idx], dtype=torch.float32).view(self.pred_len, -1)
         behavior = torch.tensor(self.behaviors[idx], dtype=torch.long)
-        return trajectory, behavior, future_trajectory
+        camera_name = torch.tensor(self.camera_names[idx], dtype=torch.long)
+        return trajectory, behavior, future_trajectory, camera_name
     
     def preprocess(self, ori_data_path):
-        all_trajectories = []
-        all_behaviors = []
-        
         for dir_name in os.listdir(ori_data_path):
             dir_path = os.path.join(ori_data_path, dir_name)
             if os.path.isdir(dir_path):
@@ -57,13 +56,13 @@ class TrajectoryDataset(Dataset):
                                 subfolder_path = os.path.join(label_folder_path, subfolder)
                                 for keypoints_file in os.listdir(subfolder_path):
                                     if keypoints_file.endswith(".json"):
+                                        camera_name = int(keypoints_file.split("_")[1]) - 1
                                         keypoints_path = os.path.join(subfolder_path, keypoints_file)
                                         keypoints_trajectory = self.get_keypoint_position(keypoints_path)
-                                        
                                         # 生成滑动窗口样本
-                                        self.generate_samples(keypoints_trajectory, label)
-        self.split_data(self.trajectories, self.behaviors, self.future_trajectories)
-    def generate_samples(self, keypoints_trajectory, label):
+                                        self.generate_samples(keypoints_trajectory, label, camera_name)
+        self.split_data(self.trajectories, self.behaviors, self.future_trajectories, self.camera_names)
+    def generate_samples(self, keypoints_trajectory, label, camera_name):
         """使用滑动窗口从轨迹中生成 (seq_len, pred_len) 对"""
         num_frames = len(keypoints_trajectory)
         for i in range(0, num_frames - self.seq_len - self.pred_len + 1, self.step_size):
@@ -72,6 +71,7 @@ class TrajectoryDataset(Dataset):
             self.trajectories.append(seq)
             self.behaviors.append(label)
             self.future_trajectories.append(future)
+            self.camera_names.append(camera_name)
 
     def get_keypoint_position(self, json_path):
         """从 JSON 文件加载关键点数据，输出 [frame_len, 33, 3] 的数据"""
@@ -88,10 +88,10 @@ class TrajectoryDataset(Dataset):
             keypoints_trajectory.append(tmp)
         return keypoints_trajectory
 
-    def split_data(self, trajectories, behaviors, future_trajectories):
-        combined = list(zip(trajectories, behaviors, future_trajectories))
+    def split_data(self, trajectories, behaviors, future_trajectories, camera_names):
+        combined = list(zip(trajectories, behaviors, future_trajectories, camera_names))
         random.shuffle(combined)
-        trajectories[:], behaviors[:], future_trajectories[:] = zip(*combined)
+        trajectories[:], behaviors[:], future_trajectories[:], camera_names[:] = zip(*combined)
         
         # 计算划分比例的索引
         train_idx = int(len(trajectories) * self.train_ratio)
@@ -102,14 +102,17 @@ class TrajectoryDataset(Dataset):
             self.trajectories = trajectories[:train_idx]
             self.behaviors = behaviors[:train_idx]
             self.future_trajectories = future_trajectories[:train_idx]
+            self.camera_names = camera_names[:train_idx]
         elif self.split == "val":
             self.trajectories = trajectories[train_idx:val_idx]
             self.behaviors = behaviors[train_idx:val_idx]
             self.future_trajectories = future_trajectories[train_idx:val_idx]
+            self.camera_names = camera_names[train_idx:val_idx]
         elif self.split == "test":
             self.trajectories = trajectories[val_idx:]
             self.behaviors = behaviors[val_idx:]
             self.future_trajectories = future_trajectories[val_idx:]
+            self.camera_names = camera_names[val_idx:]
         else:
             raise ValueError("split 参数必须是 'train', 'val' 或 'test'")
 

@@ -9,6 +9,8 @@ import os
 import time
 from tqdm import tqdm
 import argparse
+import numpy as np
+from time import time
 
 
 def get_parse_arguments():
@@ -27,13 +29,13 @@ def get_parse_arguments():
     parser.add_argument('--lstm_num_layers', type=int, default=2, help='Number of LSTM layers')
     
     # 训练参数
-    parser.add_argument('--dataset_path', type=str, default="data/rec_728", required=True, help='Path to the dataset')
+    parser.add_argument('--dataset_path', type=str, default="data/rec_728", help='Path to the dataset')
     parser.add_argument('--seq_len', type=int, default=40, help='Length of input sequence')
     parser.add_argument('--batch_size', type=int, default=2, help='Batch size for training and evaluation')
     parser.add_argument('--lr', type=float, default=1e-4, help='Learning rate')
     parser.add_argument('--num_epochs', type=int, default=80, help='Number of training epochs')
     parser.add_argument('--step_size', type=int, default=5, help='Step size for data sampling')
-
+    parser.add_argument('--save_model_path', type=str, default='best_model_1129.pth', help='Save model checkpoint')
     # 中断训练
     parser.add_argument('--resume_train', action='store_true', help='Resume training from checkpoint')
     parser.add_argument('--checkpoint_path', type=str, default="model_result/trajectory/best_model_1128.pth", help='Path to the checkpoint file')
@@ -136,9 +138,9 @@ def main(args):
     train_loader, val_loader, test_loader = load_data(args.dataset_path, args.seq_len, args.pred_length, args.step_size, args.batch_size)
 
     os.makedirs(args.output_dir, exist_ok=True)
-    best_model_path = os.path.join(args.output_dir, 'best_model_1129.pth')
-    last_model_path = os.path.join(args.output_dir, 'best_model_1129.pth')
-
+    best_model_path = os.path.join(args.output_dir, args.save_model_path)
+    last_model_path = os.path.join(args.output_dir, args.save_model_path.replace('best', 'last'))
+    logger.info(f"check {args.save_model_path.replace('best', 'last')}")
     start_epoch = 0
     best_val_loss = float('inf')
     # 中断训练
@@ -151,7 +153,7 @@ def main(args):
         best_val_loss = checkpoint['loss']
 
     logger.info("Starting training...")
-    for epoch in range(args.num_epochs):
+    for epoch in range(start_epoch, args.num_epochs):
         train_loss = train(model, train_loader, optimizer, device, epoch, args.num_epochs)
         val_loss = evaluate(model, val_loader, device)
         logger.info(f'Epoch {epoch + 1}/{args.num_epochs}, Train Loss: {train_loss:.4f}, Val Loss: {val_loss:.4f}')
@@ -173,6 +175,136 @@ def main(args):
         }, last_model_path)
     test_loss = evaluate(model, test_loader, device)
     logger.info(f"Test Loss: {test_loss:.4f}")
+
+    metrics = evaluate_metrics(model, test_loader, device)
+    logger.info(f"Test MPJPE: {metrics['mpjpe']:.4f}")
+    logger.info(f"Test PCK: {metrics['pck']:.4f}")
+    logger.info(f"Test OKS: {metrics['oks']:.4f}")
+    logger.info(f"Model Parameter Count: {metrics['num_params']}")
+    logger.info(f"Model Inference Speed (FPS): {metrics['fps']:.2f}")
+
+def evaluate_metrics(model, test_loader, device):
+
+    model.eval()
+    predicted_list = []
+    ground_truth_list = []
+    inference_times = []
+
+    sigmas = np.ones((33,)) * 0.1  # 假设的关节标准差
+    areas = np.ones((len(test_loader.dataset),))  # 假设目标区域大小为1
+
+    with torch.no_grad():
+        for trajectory, _, future_trajectory, _ in test_loader:
+            trajectory = trajectory.to(device)
+            future_trajectory = future_trajectory.to(device)
+
+            # 测量推理时间
+            start_time = time()
+            predicted = model(trajectory)
+            inference_times.append(time() - start_time)
+
+            predicted = predicted.cpu().numpy()
+            future_trajectory = future_trajectory.cpu().numpy()
+
+            predicted_list.append(predicted)
+            ground_truth_list.append(future_trajectory)
+
+    predicted = np.concatenate(predicted_list, axis=0)
+    ground_truth = np.concatenate(ground_truth_list, axis=0)
+
+    # MPJPE
+    mpjpe = compute_mpjpe(predicted, ground_truth)
+
+    # PCK
+    threshold = 0.5
+    scale = np.ones((len(test_loader.dataset),)) 
+    pck = compute_pck(predicted, ground_truth, threshold, scale)
+
+    # OKS
+    oks = np.mean([compute_oks(predicted[i], ground_truth[i], areas[i], sigmas) for i in range(len(predicted))])
+
+    # 推理速度 (FPS)
+    fps = len(test_loader.dataset) / sum(inference_times)
+
+    # 模型参数量
+    num_params = sum(p.numel() for p in model.parameters())
+
+    return {
+        "mpjpe": mpjpe,
+        "pck": pck,
+        "oks": oks,
+        "fps": fps,
+        "num_params": num_params
+    }
+
+def compute_mpjpe(predicted, ground_truth):
+    """
+    计算平均关节位置误差MPJPE
+    
+    参数：
+    predicted (numpy.ndarray): 预测的关节点位置，形状为 (N, K, 3)
+    ground_truth (numpy.ndarray): 真实的关节点位置，形状为 (N, K, 3)
+    
+    返回：
+    float: 平均关节位置误差
+    """
+    print(predicted.shape, ground_truth.shape)
+    assert predicted.shape == ground_truth.shape, "预测和真实数据的形状应相同"
+    return np.mean(np.linalg.norm(predicted - ground_truth, axis=-1))
+
+# 正确关节点百分比（PCK）
+
+def compute_pck(predicted, ground_truth, threshold, scale):
+    """
+    计算正确关节点百分比PCK
+    
+    参数：
+    predicted (numpy.ndarray): 预测的关节点位置，形状为 (N, K, 2)
+    ground_truth (numpy.ndarray): 真实的关节点位置，形状为 (N, K, 2)
+    threshold (float): 阈值比例，例如0.5表示50%
+    scale (numpy.ndarray): 用于归一化的尺度，例如头部尺寸，形状为 (N,)
+    
+    返回：
+    float: 正确关节点百分比
+    """
+    assert predicted.shape == ground_truth.shape, "预测和真实数据的形状应相同"
+    N, K, _ = predicted.shape
+    correct = 0
+    total = N * K
+    for i in range(N):
+        for j in range(K):
+            distance = np.linalg.norm(predicted[i, j] - ground_truth[i, j])
+            if distance <= threshold * scale[i]:
+                correct += 1
+    return correct / total
+
+# 目标关键点相似度（OKS）
+
+def compute_oks(predicted, ground_truth, area, sigmas):
+    """
+    计算目标关键点相似度OKS
+    
+    参数：
+    predicted (numpy.ndarray): 预测的关节点位置，形状为 (K, 3)
+    ground_truth (numpy.ndarray): 真实的关节点位置，形状为 (K, 3)
+    area (float): 目标区域的面积
+    sigmas (numpy.ndarray): 关键点的标准差，形状为 (K,)
+    
+    返回：
+    float: 目标关键点相似度
+    """
+    vars = (sigmas * 2) ** 2
+    xg = ground_truth[:, 0]
+    yg = ground_truth[:, 1]
+    vg = ground_truth[:, 2]
+    xd = predicted[:, 0]
+    yd = predicted[:, 1]
+    dx = xd - xg
+    dy = yd - yg
+    e = (dx ** 2 + dy ** 2) / vars / (area + np.spacing(1)) / 2
+    if np.count_nonzero(vg > 0) > 0:
+        e = e[vg > 0]
+    return np.sum(np.exp(-e)) / e.shape[0]
 
 
 if __name__ == '__main__':

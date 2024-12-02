@@ -169,10 +169,10 @@ if __name__ == "__main__":
     num_classes = 6   # 模型使用的数据集和网络最后一层输出参数
     lr = 1e-4  # 学习率
     save_dir = 'model_result'
+    dataset_path = "data/rec_1105_frame"
 
-
-    train_dataloader = DataLoader(VideoDataset(dataset_path='data/rec_728_frame_only_body_new', images_path='train', clip_len=16), batch_size=16, shuffle=True, num_workers=2)
-    val_dataloader = DataLoader(VideoDataset(dataset_path='data/rec_728_frame_only_body_new', images_path='val', clip_len=16), batch_size=16, num_workers=2)
-    test_dataloader = DataLoader(VideoDataset(dataset_path='data/rec_728_frame_only_body_new', images_path='test', clip_len=16), batch_size=16, num_workers=2)
+    train_dataloader = DataLoader(VideoDataset(dataset_path=dataset_path, images_path='train', clip_len=16), batch_size=16, shuffle=True, num_workers=2)
+    val_dataloader = DataLoader(VideoDataset(dataset_path=dataset_path, images_path='val', clip_len=16), batch_size=16, num_workers=2)
+    test_dataloader = DataLoader(VideoDataset(dataset_path=dataset_path, images_path='test', clip_len=16), batch_size=16, num_workers=2)
 
     train_model(num_epochs, num_classes, lr, device, save_dir, train_dataloader, val_dataloader, test_dataloader)

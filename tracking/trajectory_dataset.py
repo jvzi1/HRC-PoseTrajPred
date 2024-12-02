@@ -113,14 +113,26 @@ class TrajectoryDataset(Dataset):
             self.behaviors = behaviors[val_idx:]
             self.future_trajectories = future_trajectories[val_idx:]
             self.camera_names = camera_names[val_idx:]
+            # 保存测试集信息到txt文件
+            output_file = "data/test_set_entries.json"
+            with open(output_file, "w") as f:
+                for i in range(len(self.trajectories)):
+                    entry = {
+                        "trajectory": self.trajectories[i],
+                        "behavior": self.behaviors[i],
+                        "future_trajectory": self.future_trajectories[i],
+                        "camera_name": self.camera_names[i],
+                    }
+                    f.write(json.dumps(entry) + "\n")  # 保存为JSON格式，便于解析
+            print(f"测试集条目已保存至: {output_file}")
         else:
             raise ValueError("split 参数必须是 'train', 'val' 或 'test'")
 
 if __name__ == "__main__":
     dataset_path = r"F:\video_rec_new\data\rec_728"
-    seq_len = 80
-    pred_len = 20
-    step_size = 5
+    seq_len = 40
+    pred_len = 8
+    step_size = 3
     
     train_dataset = TrajectoryDataset(dataset_path, seq_len, pred_len, split="train", step_size=step_size)
     val_dataset = TrajectoryDataset(dataset_path, seq_len, pred_len, split="val", step_size=step_size)

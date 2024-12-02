@@ -3,8 +3,6 @@ import json
 import torch
 import numpy as np
 import cv2
-import sys
-print(sys.path)
 from trajectory_model import TrajectoryTransformerModel
 from loguru import logger 
 
@@ -67,9 +65,10 @@ def extract_keypoints_from_json(json_data):
 
 def predict_trajectory(model, trajectory_input):
     """使用模型预测未来轨迹"""
-    behavior_input = torch.tensor([0]).to(device)
+    behavior_input = torch.tensor([3]).to(device)
+    camera_name_input = torch.tensor([0]).to(device)
     with torch.no_grad():
-        predicted_trajectory = model(trajectory_input, behavior_input).cpu().numpy()
+        predicted_trajectory = model(trajectory_input, behavior_input, camera_name_input).cpu().numpy()
     return predicted_trajectory
 
 
@@ -185,8 +184,6 @@ def infer_from_json(model, json_path, video_path, output_path, speed=100, iterat
 
         # 多次迭代预测
         predicted_trajectories = []  
-        weights = gaussian_weights(pred_len)  
-        half_pred_len = pred_len // 2  
 
         trajectory_input = preprocess_keypoints(seq_buffer)
         

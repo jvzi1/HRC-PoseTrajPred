@@ -84,8 +84,65 @@ class TrajectoryTransformerModel(nn.Module):
         
         return output
     
+import torch
+import torch.nn as nn
+
+class LSTMTrajectoryModel(nn.Module):
+    def __init__(self, num_joints, embed_size, pred_length, lstm_hidden_size, lstm_num_layers):
+        super(LSTMTrajectoryModel, self).__init__()
+        
+        self.pred_length = pred_length
+        self.num_joints = num_joints
+        
+        # 轨迹数据输入线性层，将输入关键点位置映射到 embed_size
+        self.trajectory_embedding = nn.Linear(num_joints * 3, embed_size)
+        
+        # 主干网络 -- LSTM
+        self.lstm = nn.LSTM(input_size=embed_size, 
+                            hidden_size=lstm_hidden_size, 
+                            num_layers=lstm_num_layers, 
+                            batch_first=True)
+        
+        # 用于从 LSTM 的隐藏状态中预测未来轨迹
+        self.fc_out = nn.Linear(lstm_hidden_size, num_joints * 3 * pred_length)
+    
+    def forward(self, trajectory):
+        """
+        trajectory: [batch_size, seq_len, num_joints * 3]
+        """
+        # 轨迹数据 embedding
+        trajectory_embedded = self.trajectory_embedding(trajectory)  # [batch_size, seq_len, embed_size]
+        
+        # LSTM 主干网络
+        lstm_output, _ = self.lstm(trajectory_embedded)  # [batch_size, seq_len, lstm_hidden_size]
+        
+        # 只取最后一个时间步的 LSTM 输出
+        lstm_output_last = lstm_output[:, -1, :]  # [batch_size, lstm_hidden_size]
+        
+        # 预测未来轨迹
+        output = self.fc_out(lstm_output_last)  # [batch_size, num_joints * 3 * pred_length]
+        
+        return output.view(output.size(0), self.pred_length, self.num_joints * 3)  # [batch_size, pred_length, num_joints * 3]
+
 
 if __name__ == "__main__":
+    num_joints = 33
+    embed_size = 128
+    pred_length = 8
+    lstm_hidden_size = 256
+    lstm_num_layers = 2
+
+    model = LSTMTrajectoryModel(
+        num_joints=num_joints,
+        embed_size=embed_size,
+        pred_length=pred_length,
+        lstm_hidden_size=lstm_hidden_size,
+        lstm_num_layers=lstm_num_layers
+    )
+
+    print(model)
+
+
     num_joints = 33
     embed_size = 128
     num_heads = 8

@@ -1,7 +1,7 @@
 import torch.optim as optim
 import torch.nn as nn
 from trajectory_dataset import TrajectoryDataset
-from trajectory_model import TrajectoryTransformerModel
+from trajectory_model import LSTMTrajectoryModel
 from torch.utils.data import DataLoader
 import torch
 from loguru import logger 
@@ -61,15 +61,9 @@ def init_model(num_joints, embed_size, num_heads,
                behavior_embed_size, camera_name_embed_size, pred_length, 
                lstm_hidden_size, lstm_num_layers, device):
     
-    model = TrajectoryTransformerModel(
+    model = LSTMTrajectoryModel(
         num_joints=num_joints,
         embed_size=embed_size,
-        num_heads=num_heads,
-        num_layers=num_layers,
-        behavior_vocab_size=behavior_vocab_size,
-        camera_name_vocab_size=camera_name_vocab_size,
-        behavior_embed_size=behavior_embed_size,
-        camera_name_embed_size=camera_name_embed_size,
         pred_length=pred_length,
         lstm_hidden_size=lstm_hidden_size,
         lstm_num_layers=lstm_num_layers
@@ -101,7 +95,7 @@ def train(model, train_loader, optimizer, device, epoch, num_epochs):
         future_trajectory = future_trajectory.to(device)
         camera_name = camera_name.to(device)
         # 前向传播
-        predicted_trajectory = model(trajectory, behavior, camera_name)
+        predicted_trajectory = model(trajectory)
         loss = compute_loss(predicted_trajectory, future_trajectory) * 10
         # 反向传播
         optimizer.zero_grad()
@@ -121,7 +115,7 @@ def evaluate(model, val_loader, device):
             future_trajectory = future_trajectory.to(device)
             camera_name = camera_name.to(device)
 
-            predicted_trajectory = model(trajectory, behavior, camera_name)
+            predicted_trajectory = model(trajectory)
             loss = compute_loss(predicted_trajectory, future_trajectory) * 10
             total_loss += loss.item() * trajectory.size(0)
     return total_loss / len(val_loader.dataset)
@@ -201,7 +195,7 @@ def evaluate_metrics(model, test_loader, device):
             camera_name = camera_name.to(device)
             # 测量推理时间
             start_time = time()
-            predicted = model(trajectory, behavior, camera_name)
+            predicted = model(trajectory)
             inference_times.append(time() - start_time)
 
             predicted = predicted.cpu().numpy()

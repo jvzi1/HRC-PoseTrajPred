@@ -270,7 +270,8 @@ def infer_online(trajectory_model_path, c3d_model_path, camera_index=0, speed=10
         cv2.imshow('Trajectory Prediction', frame)
         if cv2.waitKey(1) & 0xFF == ord('q'):
             break
-        
+        #tohcx
+        print(predicted_trajectories.shape)
         frame_count += 1
     cap.release()
     cv2.destroyAllWindows()

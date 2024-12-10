@@ -113,7 +113,7 @@ def visualize_result(frame, keypoints, predicted_trajectory, history_buffer=None
     for x, y, z in keypoints:
         cv2.circle(frame, (int(x * frame.shape[1]), int(y * frame.shape[0])), 2, (0, 255, 0), -1)
 
-    # 绘制历史轨迹（如果提供）
+    # 绘制历史轨迹(暂不需要)
     if history_buffer is not None:
         for t, history_keypoints in enumerate(history_buffer):
             alpha = 1.0 - t / len(history_buffer)  # 随时间渐变透明
@@ -208,9 +208,9 @@ def infer_online(trajectory_model_path, c3d_model_path, camera_index=0, speed=10
         seq_buffer.append(keypoints_array)
 
         # 更新历史轨迹，用于可视化(可根据需求限制长度)
-        history_buffer.append(keypoints_array.reshape(num_joints, 3))
-        if len(history_buffer) > seq_len:
-            history_buffer.pop(0)
+        # history_buffer.append(keypoints_array.reshape(num_joints, 3))
+        # if len(history_buffer) > seq_len:
+        #     history_buffer.pop(0)
 
 
         c3d_frame = frame.copy()
@@ -255,7 +255,7 @@ def infer_online(trajectory_model_path, c3d_model_path, camera_index=0, speed=10
         # 可视化结果并写入视频
         if len(seq_buffer) > 0:
             current_keypoints = seq_buffer[-1].reshape(num_joints, 3)
-            frame = visualize_result(frame, current_keypoints, predicted_trajectories, history_buffer=history_buffer)
+            frame = visualize_result(frame, current_keypoints, predicted_trajectories)
         cv2.putText(frame, f"Behavior: {behavior}", (10,30), cv2.FONT_HERSHEY_SIMPLEX, 1, (0,0,255), 2)
         cv2.imshow('Trajectory Prediction', frame)
         if cv2.waitKey(1) & 0xFF == ord('q'):

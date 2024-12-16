@@ -204,7 +204,7 @@ def infer_online(trajectory_model_path, c3d_model_path, camera_index=0, speed=10
                 keypoints_array.extend([lm.x, lm.y, lm.z])
             keypoints_array = np.array(keypoints_array) # [num_joints*3]
         else:
-            seq_buffer.append([0.0] * (num_joints * 3))  
+            keypoints_array = np.zeros(num_joints * 3, dtype=np.float32)
         seq_buffer.append(keypoints_array)
 
         # 更新历史轨迹，用于可视化(可根据需求限制长度)

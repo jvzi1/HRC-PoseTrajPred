@@ -9,13 +9,13 @@ from torch.optim.lr_scheduler import StepLR
 import argparse
 import timeit
 from tqdm import tqdm
-
+from torch.utils.tensorboard import SummaryWriter
     
 def get_parse_arguments():
     parser = argparse.ArgumentParser()
     parser.add_argument('--num_epochs', type=int, default=100, help='Number of joints in the input')
     parser.add_argument("--num_classes", type=int, default=6 , help="Number of output classes")
-    parser.add_argument('--dataset_path', type=str, default="data/rec_728", help='Path to the dataset')
+    parser.add_argument('--dataset_path', type=str, default="data/rec_728_frame_with_roi", help='Path to the dataset')
     parser.add_argument('--batch_size', type=int, default=8, help='Batch size for training and evaluation')
     parser.add_argument('--lr', type=float, default=1e-4, help='Learning rate')
     # parser.add_argument('--save_model_name', type=str, default='best_model.pth', help='Save model checkpoint')
@@ -47,16 +47,16 @@ def train_model(args):
     # 设置设备
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    # 数据集路径
-    train_data_path = os.path.join(args.dataset_path, "train")
-    val_data_path = os.path.join(args.dataset_path, "val")
+    writer = SummaryWriter(log_dir=os.path.join(args.output_dir, "logs"))
 
     # 加载数据集
-    train_dataset = VideoDatasetWithROI(train_data_path, clip_len=16)
-    val_dataset = VideoDatasetWithROI(val_data_path, clip_len=16)
+    train_dataset = VideoDatasetWithROI(args.dataset_path, 'train', clip_len=16)
+    val_dataset = VideoDatasetWithROI(args.dataset_path, 'val', clip_len=16)
+    test_dataset = VideoDatasetWithROI(args.dataset_path, 'test', clip_len=16)
 
     train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True, num_workers=4)
     val_loader = DataLoader(val_dataset, batch_size=args.batch_size, shuffle=False, num_workers=4)
+    test_loader = DataLoader(test_dataset, batch_size=args.batch_size, shuffle=False, num_workers=4)
 
     # 加载模型
     model = C3D_with_roi(num_classes=args.num_classes)
@@ -85,10 +85,8 @@ def train_model(args):
     else:
         start_epoch = 0
 
-    best_val_acc = 0.0
-    best_epoch = 0
     # 训练循环
-    for epoch in range(args.num_epochs):
+    for epoch in range(start_epoch, args.num_epochs):
         for phase in ['train', 'val']:
             start_time = timeit.default_timer()
             running_loss = 0.0  # 初始化loss值
@@ -107,6 +105,7 @@ def train_model(args):
                 optimizer.zero_grad()
                 with torch.set_grad_enabled(phase == 'train'):
                     outputs = model(inputs)
+                    labels = labels.long()
                     loss = criterion(outputs, labels)
                     _, preds = torch.max(outputs, 1)
 
@@ -122,6 +121,8 @@ def train_model(args):
             epoch_loss = running_loss / len(data_loader.dataset)
             epoch_acc = running_corrects.double() / len(data_loader.dataset)
             
+            writer.add_scalar(f'{phase}_loss', epoch_loss, epoch)
+            writer.add_scalar(f'{phase}_accuracy', epoch_acc, epoch)
             print(f"[{phase}] Epoch {epoch + 1}/{args.num_epochs} Loss: {epoch_loss:.4f} Acc: {epoch_acc:.4f}")
             print(f"Execution time for {phase}: {timeit.default_timer() - start_time:.2f} seconds")
 
@@ -143,6 +144,21 @@ def train_model(args):
         last_model_path)
     print(f"Last model saved at epoch {args.num_epochs}")
 
+    model.eval()
+    running_corrects = 0
+    test_size = len(test_loader.dataset)
+
+    for inputs, labels in tqdm(test_loader, desc="Testing"):
+        inputs, labels = inputs.to(device), labels.to(device)
+        with torch.no_grad():
+            outputs = model(inputs)
+            _, preds = torch.max(outputs, 1)
+            running_corrects += torch.sum(preds == labels)
+
+    test_acc = running_corrects.double() / test_size
+    print(f"Test Accuracy: {test_acc:.4f}")
+
+    writer.close()
 if __name__ == "__main__":
     args = get_parse_arguments()
     train_model(args)

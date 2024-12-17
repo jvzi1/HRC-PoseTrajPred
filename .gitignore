@@ -1,6 +1,9 @@
 /dataset/
 /model_result/
-/__pycache__/
+**/__pycache__/
+*.pyc
+*.pyo
+*.pyd
 ucf101-caffe.pth
 pose_landmarker_heavy.task
 v_YoYo_g01_c01.avi
@@ -8,3 +11,4 @@ yolov8l.pt
 /logs/
 test.py
 /data/
+

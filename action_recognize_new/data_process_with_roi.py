@@ -3,8 +3,8 @@ from sklearn.model_selection import train_test_split
 import cv2
 import numpy as np
 from ultralytics import YOLO
-
-def process_video_with_roi(dir_name, ori_data_path, video_path, save_dir, model_yolo, resize_dims=(171, 128)):
+from tqdm import tqdm
+def process_video_with_roi(dir_name, ori_data_path, video_path, save_dir, model_yolo, resize_dims=(171, 128), padding=10):
     # 初始化变量
     video_basename = os.path.basename(video_path).split('.')[0]
     frame_dir_name = f"{dir_name}_{video_basename}"
@@ -29,6 +29,10 @@ def process_video_with_roi(dir_name, ori_data_path, video_path, save_dir, model_
         for result in results:
             for box in result.boxes.xyxy:
                 x1, y1, x2, y2 = box.int().tolist()
+                x1 = max(x1 - padding, 0)  
+                y1 = max(y1 - padding, 0)  
+                x2 = min(x2 + padding, frame.shape[1])  
+                y2 = min(y2 + padding, frame.shape[0])
                 roi_mask[y1:y2, x1:x2] = 1.0 # 将ROI区域标记为1
                 roi_mask[roi_mask == 0] = 0.2 # 环境区域标记为0.2
                 break  # 只处理第一个检测目标
@@ -53,12 +57,12 @@ def preprocess_with_roi(ori_data_path, output_data_path, model_yolo):
         os.mkdir(os.path.join(output_data_path, 'train'))
         os.mkdir(os.path.join(output_data_path, 'val'))
         os.mkdir(os.path.join(output_data_path, 'test'))
-    for dir_name in os.listdir(ori_data_path):
+    for dir_name in tqdm(os.listdir(ori_data_path), desc="Processing Directories"):
         dir_path = os.path.join(ori_data_path, dir_name)
         if os.path.isdir(dir_path):
             annotated_videos_path = os.path.join(dir_path, 'annotated_videos')
             if os.path.exists(annotated_videos_path):
-                for action_name in os.listdir(annotated_videos_path):
+                for action_name in tqdm(os.listdir(annotated_videos_path), desc=f"Processing {dir_name}"):
                     action_path = os.path.join(annotated_videos_path, action_name)
                     if os.path.isdir(action_path):
                         video_folders = []
@@ -83,11 +87,11 @@ def preprocess_with_roi(ori_data_path, output_data_path, model_yolo):
                             os.mkdir(test_dir)
 
                         # 处理每个划分的数据集
-                        for video in train:
+                        for video in tqdm(train, desc=f"Processing Train Videos in {action_name}"):
                             process_video_with_roi(dir_name, action_path, video, train_dir, model_yolo)
-                        for video in val:
+                        for video in tqdm(val, desc=f"Processing Validation Videos in {action_name}"):
                             process_video_with_roi(dir_name, action_path, video, val_dir, model_yolo)
-                        for video in test:
+                        for video in tqdm(test, desc=f"Processing Test Videos in {action_name}"):
                             process_video_with_roi(dir_name, action_path, video, test_dir, model_yolo)
                         print(f'{action_name}类别下的数据处理完成')
 
@@ -95,7 +99,7 @@ def preprocess_with_roi(ori_data_path, output_data_path, model_yolo):
 
 if __name__ == "__main__":
     ori_data_path = "data/rec_728"
-    output_data_path = "data/processed_with_roi"
+    output_data_path = "data/rec_728_frame_with_roi"
     yolo_model = YOLO('yolov8l.pt')  # 初始化YOLO模型
 
     preprocess_with_roi(ori_data_path, output_data_path, yolo_model)

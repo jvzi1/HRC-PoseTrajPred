@@ -11,7 +11,7 @@ from torch.utils.data import Dataset, DataLoader
 
 
 class VideoDatasetWithROI(Dataset):
-    def __init__(self, dataset_path, images_path, clip_len, resize_height=144, resize_width=144, crop_size=112, normalize_means=(90.0, 98.0, 102.0)):
+    def __init__(self, dataset_path, images_path, clip_len, resize_height=128, resize_width=171, crop_size=112, normalize_means=(90.0, 98.0, 102.0)):
         self.dataset_path = dataset_path
         self.split = images_path
         self.clip_len = clip_len
@@ -37,10 +37,7 @@ class VideoDatasetWithROI(Dataset):
     def __getitem__(self, index):
         buffer, roi_mask = self.load_frames_with_roi(self.fnames[index])
         if buffer.shape[0] < self.clip_len:
-            repeat_count = self.clip_len - buffer.shape[0]
-            buffer = np.concatenate([buffer, buffer[-1:].repeat(repeat_count, axis=0)], axis=0)
-            roi_mask = np.concatenate([roi_mask, roi_mask[-1:].repeat(repeat_count, axis=0)], axis=0)
-
+            return self.__getitem__((index + 1) % len(self))
         buffer = self.crop(buffer)
         roi_mask = self.crop(roi_mask)
         buffer = self.normalize(buffer)
@@ -83,6 +80,8 @@ class VideoDatasetWithROI(Dataset):
         return np.array(padded_frames)
 
     def crop(self, buffer):
+        if buffer.shape[0] <= self.clip_len:
+            return buffer[:self.clip_len]
         time_index = np.random.randint(buffer.shape[0] - self.clip_len)
         height_index = np.random.randint(buffer.shape[1] - self.crop_size)
         width_index = np.random.randint(buffer.shape[2] - self.crop_size)
@@ -105,11 +104,11 @@ class VideoDatasetWithROI(Dataset):
         return buffer.transpose((3, 0, 1, 2))
 
 if __name__ == "__main__":
-    train_data = VideoDatasetWithROI(dataset_path='data/ucf101', images_path='train', clip_len=16)
+    train_data = VideoDatasetWithROI(dataset_path='data/rec_728_frame_with_roi', images_path='train', clip_len=16)
     train_loader = DataLoader(train_data, batch_size=64, shuffle=True, num_workers=0)
 
-    val_data = VideoDatasetWithROI(dataset_path='data/ucf101', images_path='val', clip_len=16)
+    val_data = VideoDatasetWithROI(dataset_path='data/rec_728_frame_with_roi', images_path='val', clip_len=16)
     val_loader = DataLoader(val_data, batch_size=64, shuffle=True, num_workers=0)
 
-    test_data = VideoDatasetWithROI(dataset_path='data/ucf101', images_path='test', clip_len=16)
+    test_data = VideoDatasetWithROI(dataset_path='data/rec_728_frame_with_roi', images_path='test', clip_len=16)
     test_loader = DataLoader(test_data, batch_size=64, shuffle=True, num_workers=0)

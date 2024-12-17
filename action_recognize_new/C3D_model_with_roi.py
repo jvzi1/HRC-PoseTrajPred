@@ -23,7 +23,7 @@ class C3D_with_roi(nn.Module):
         self.conv5b = nn.Conv3d(512, 512, kernel_size=(3, 3, 3), padding=1)
         self.pool5 = nn.MaxPool3d(kernel_size=(2, 2, 2), stride=(2, 2, 2))
 
-        self.fc6 = nn.Linear(512 * 2 * 4 * 4, 4096)
+        self.fc6 = None
         self.fc7 = nn.Linear(4096, 4096)
         self.fc8 = nn.Linear(4096, num_classes)
 
@@ -50,6 +50,8 @@ class C3D_with_roi(nn.Module):
         x = self.pool5(x)
 
         x = x.view(x.size(0), -1)
+        if self.fc6 is None:
+            self.fc6 = nn.Linear(x.size(1), 4096).to(x.device)
         x = self.relu(self.fc6(x))
         x = self.dropout(x)
         x = self.relu(self.fc7(x))

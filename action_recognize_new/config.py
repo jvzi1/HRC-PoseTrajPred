@@ -1,0 +1,2 @@
+RESIZE_DIMS = (256,256)
+YOLO_MODEL = "yolov8l.pt"

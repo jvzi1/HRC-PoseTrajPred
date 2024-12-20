@@ -38,12 +38,11 @@ class VideoDatasetWithROI(Dataset):
         buffer, roi_mask = self.load_frames_with_roi(self.fnames[index])
         if buffer.shape[0] < self.clip_len:
             return self.__getitem__((index + 1) % len(self))
-        buffer = self.crop(buffer)
-        roi_mask = self.crop(roi_mask)
         buffer = self.normalize(buffer)
         buffer = self.add_roi_as_channel(buffer, roi_mask)
+        print(buffer.shape)
         buffer = self.to_tensor(buffer)
-
+        
         labels = np.array(self.label_array[index])
         return torch.from_numpy(buffer), torch.from_numpy(labels)
 

@@ -4,7 +4,7 @@ import cv2
 import numpy as np
 from ultralytics import YOLO
 from tqdm import tqdm
-def process_video_with_roi(dir_name, ori_data_path, video_path, save_dir, model_yolo, resize_dims=(171, 128), padding=10):
+def process_video_with_roi(dir_name, ori_data_path, video_path, save_dir, model_yolo, resize_dims=(256, 256), padding=10):
     # 初始化变量
     video_basename = os.path.basename(video_path).split('.')[0]
     frame_dir_name = f"{dir_name}_{video_basename}"
@@ -31,7 +31,7 @@ def process_video_with_roi(dir_name, ori_data_path, video_path, save_dir, model_
                 x1, y1, x2, y2 = box.int().tolist()
                 x1 = max(x1 - padding, 0)  
                 y1 = max(y1 - padding, 0)  
-                x2 = min(x2 + padding, frame.shape[1])  
+                x2 = min(x2 + padding, frame.shape[1])
                 y2 = min(y2 + padding, frame.shape[0])
                 roi_mask[y1:y2, x1:x2] = 1.0 # 将ROI区域标记为1
                 roi_mask[roi_mask == 0] = 0.2 # 环境区域标记为0.2
